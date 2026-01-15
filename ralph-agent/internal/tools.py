@@ -94,6 +94,33 @@ def run_command(command: str):
     except Exception as e:
         return f"Docker Execution Error: {e}"
 
+def git_commit(message: str):
+    """
+    Executes 'git add -A' and 'git commit -m' inside the container.
+    Returns the output of the commit command.
+    """
+    try:
+        # 1. Git Add
+        add_cmd = ["docker", "exec", "-w", "/app", "ralph-workspace", "/bin/sh", "-c", "git add -A"]
+        subprocess.run(add_cmd, check=True, capture_output=True)
+
+        # 2. Git Commit
+        # Escape quotes for the shell
+        safe_message = message.replace('"', '\\"')
+        commit_cmd = ["docker", "exec", "-w", "/app", "ralph-workspace", "/bin/sh", "-c", f'git commit -m "{safe_message}"']
+        
+        result = subprocess.run(commit_cmd, capture_output=True, text=True)
+        
+        output = f"STDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}"
+        if result.returncode != 0:
+             output += f"\nExit Code: {result.returncode}"
+        return output
+
+    except subprocess.CalledProcessError as e:
+        return f"Git Error (Add/Commit failed): {e}"
+    except Exception as e:
+        return f"Git Execution Error: {e}"
+
 # --- Subagent Tools ---
 
 def _run_subagent_process(instructions, file_paths):

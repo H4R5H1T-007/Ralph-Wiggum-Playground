@@ -5,7 +5,7 @@
 1. Your task is to implement functionality per the specifications using parallel subagents. Follow @IMPLEMENTATION_PLAN.md and choose the most important item to address. Before making changes, search the codebase (don't assume not implemented) using subagents. You may use up to 10 parallel subagents for searches/reads and only 1 subagent for build/tests. Use subagents when complex reasoning is needed (debugging, architectural decisions).
 2. **Strict TDD Requirement**: Create a test file first (e.g. `tests/test_feature.ts`) assertion the requirements. Run it to see it FAIL (Red). THEN implement functionality or resolve problems. Finally run the tests again to see them PASS (Green). If functionality is missing then it's your job to add it as per the application specifications. Ultrathink.
 3. When you discover issues, immediately update @IMPLEMENTATION_PLAN.md with your findings using a subagent. When resolved, update and remove the item.
-4. When the tests pass, update @IMPLEMENTATION_PLAN.md, then `git add -A` then `git commit` with a message describing the changes. After the commit, `git push`.
+4. When the tests pass, update @IMPLEMENTATION_PLAN.md, then use the `git_commit` tool to save your work. 
 
 99999. Important: When authoring documentation, capture the why — tests and implementation importance.
 999999. Important: Single sources of truth, no migrations/adapters. If tests unrelated to your work fail, resolve them as part of the increment.
@@ -18,3 +18,4 @@
 9999999999999. When @IMPLEMENTATION_PLAN.md becomes large periodically clean out the items that are completed from the file using a subagent.
 99999999999999. If you find inconsistencies in the specs/* then use an subagent with high requested to update the specs.
 999999999999999. IMPORTANT: Keep @AGENTS.md operational only — status updates and progress notes belong in `IMPLEMENTATION_PLAN.md`. A bloated AGENTS.md pollutes every future loop's context.
+9999999999999999. IMPORTANT: Do not use `run_command` for git operations; `git_commit` handles everything and signals the end of your task.

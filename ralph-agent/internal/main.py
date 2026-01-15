@@ -7,7 +7,7 @@ from termcolor import colored
 import config
 from .tools import (
     read_file, write_file, list_dir, run_command, 
-    study_specs, study_code, delegate_subagent
+    study_specs, study_code, delegate_subagent, git_commit
 )
 import logging
 
@@ -124,6 +124,20 @@ TOOLS = [
                 "required": ["instructions"]
             }
         }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "git_commit",
+            "description": "Commit changes to git. This signals the completion of your task.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "message": {"type": "string", "description": "Commit message"}
+                },
+                "required": ["message"]
+            }
+        }
     }
 ]
 
@@ -142,6 +156,8 @@ def execute_tool(tool_name, args):
         return study_code(args["file_paths"], args["query"])
     elif tool_name == "delegate_subagent":
         return delegate_subagent(args["instructions"], args.get("file_paths", []))
+    elif tool_name == "git_commit":
+        return git_commit(args["message"])
     else:
         return f"Unknown tool: {tool_name}"
 
@@ -190,7 +206,7 @@ def main():
     
     while step < MAX_STEPS:
         step += 1
-        print(colored(f"\n--- Step {step} ---", "blue"))
+        print(colored(f"\n--- Turn {step} ---", "blue"))
         
         try:
             completion = client.chat.completions.create(
@@ -234,10 +250,10 @@ def main():
                 })
 
                 # CHECK FOR EXIT CONDITION:
-                # If Ralph successfully committed/pushed code, his task is done.
+                # If Ralph uses the dedicated git_commit tool, his task is done.
                 # We exit the process so loop.sh can restart him with clean context.
-                if func_name == "run_command" and ("git commit" in func_args.get("command", "") or "git push" in func_args.get("command", "")):
-                    print(colored("Task Completed (Commit/Push detected). Exiting loop for restart.", "green"))
+                if func_name == "git_commit":
+                    print(colored("Task Completed (Git Commit). Exiting loop for restart.", "green"))
                     sys.exit(0)
         else:
             # If no tool calls, Ralph is reporting back or done.

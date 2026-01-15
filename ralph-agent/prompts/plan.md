@@ -1,30 +1,10 @@
-You are Ralph, an advanced AI software architect.
-You are running in a constrained, safe environment.
+0a. Study `specs/*` with up to 10 parallel subagents to learn the application specifications.
+0b. Study @IMPLEMENTATION_PLAN.md (if present) to understand the plan so far.
+0c. Study `src/lib/*` with up to 10 parallel subagents to understand shared utilities & components.
+0d. For reference, the application source code is in `src/*`.
 
-## Goal
-Your goal is to analyze the requirements in `specs/` and create or update the `@IMPLEMENTATION_PLAN.md`.
+1. Study @IMPLEMENTATION_PLAN.md (if present; it may be incorrect) and use up to 10 subagents to study existing source code in `src/*` and compare it against `specs/*`. Use an subagent to analyze findings, prioritize tasks, and create/update @IMPLEMENTATION_PLAN.md as a bullet point list sorted in priority of items yet to be implemented. Ultrathink. Consider searching for TODO, minimal implementations, placeholders, skipped/flaky tests, and inconsistent patterns. Study @IMPLEMENTATION_PLAN.md to determine starting point for research and keep it up to date with items considered complete/incomplete using subagents.
 
-## Methodology (Acceptance-Driven Backpressure)
-1.  **Study**: Use `study_specs(["specs/file.md"], "question")` to understand the requirements.
-2.  **Gap Analysis**: Compare the specs against the existing plan and code.
-3.  **Backpressure**: For every task you identify, you MUST derive **Required Tests** from the Acceptance Criteria.
-    *   *What* defines success? (e.g., "Function returns X when Y").
-    *   Tests must be specific.
-4.  **Plan**: Create/Update `IMPLEMENTATION_PLAN.md` with a bulleted list of tasks.
-    *   Each task MUST have a "Required Tests" sub-section.
+IMPORTANT: Plan only. Do NOT implement anything. Do NOT assume functionality is missing; confirm with code search first. Treat `src/lib` as the project's standard library for shared utilities and components. Prefer consolidated, idiomatic implementations there over ad-hoc copies.
 
-## Loop Instructions
-1.  **Context**: Read `@AGENTS.md` (if provided) to understand operational constraints or learnings.
-2.  Start by listing `specs/` directory.
-3.  Use `study_specs` to read relevant specs.
-3.  Read `IMPLEMENTATION_PLAN.md` (if it exists) using `read_file`.
-4.  Think deeply (Ultrathink).
-5.  Generate the updated plan.
-6.  Write the plan to `IMPLEMENTATION_PLAN.md`.
-7.  Verify the plan content.
-8.  Stop.
-
-## Constraints
-*   You CANNOT write to `src/` in this mode. Only `IMPLEMENTATION_PLAN.md`.
-*   You CANNOT run build commands.
-*   You must rely on `study_specs` and `read_file`.
+ULTIMATE GOAL: We want to achieve complete Indian Aroma web and API applications. Consider missing elements and plan accordingly. If an element is missing, search first to confirm it doesn't exist, then if needed author the specification at specs/FILENAME.md. If you create a new element then document the plan to implement it in @IMPLEMENTATION_PLAN.md using a subagent.
