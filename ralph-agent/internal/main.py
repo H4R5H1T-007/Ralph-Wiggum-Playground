@@ -9,6 +9,17 @@ from .tools import (
     read_file, write_file, list_dir, run_command, 
     study_specs, study_code, delegate_subagent
 )
+import logging
+
+# Configure Logging
+LOG_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "logs")
+os.makedirs(LOG_DIR, exist_ok=True)
+logging.basicConfig(
+    filename=os.path.join(LOG_DIR, "ralph.log"),
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s",
+    filemode="a"
+)
 
 # Tool Definitions for OpenAI API
 TOOLS = [
@@ -73,7 +84,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "study_specs",
-            "description": "Spawn subagent to analyze specs.",
+            "description": "Spawn subagent to analyze specs. Use this to understand requirements before coding.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -88,7 +99,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "study_code",
-            "description": "Spawn subagent to analyze code.",
+            "description": "Analyze logic across multiple files efficiently. Preferred over read_file for understanding code.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -103,7 +114,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "delegate_subagent",
-            "description": "Delegate a task to a subagent with specific files context.",
+            "description": "Delegate ANY task (coding, reasoning, analysis) to a subagent to parallelize work. Use this often to save your own context.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -175,7 +186,7 @@ def main():
 
     # Loop
     step = 0
-    MAX_STEPS = 20 # Safety limit
+    MAX_STEPS = 100 # Safety limit
     
     while step < MAX_STEPS:
         step += 1
@@ -206,7 +217,14 @@ def main():
                 print(colored(f"Tool Call: {func_name}", "yellow"))
                 
                 # Execute
-                result = execute_tool(func_name, func_args)
+                try:
+                    logging.info(f"Tool Call: {func_name} | Args: {func_args}")
+                    result = execute_tool(func_name, func_args)
+                    logging.info(f"Tool Result ({func_name}): {result}")
+                except Exception as e:
+                    error_msg = f"Error executing tool '{func_name}': {str(e)}"
+                    logging.error(error_msg)
+                    result = error_msg
                 
                 # Append result
                 messages.append({
@@ -214,6 +232,13 @@ def main():
                     "tool_call_id": tool_call.id,
                     "content": str(result)
                 })
+
+                # CHECK FOR EXIT CONDITION:
+                # If Ralph successfully committed/pushed code, his task is done.
+                # We exit the process so loop.sh can restart him with clean context.
+                if func_name == "run_command" and ("git commit" in func_args.get("command", "") or "git push" in func_args.get("command", "")):
+                    print(colored("Task Completed (Commit/Push detected). Exiting loop for restart.", "green"))
+                    sys.exit(0)
         else:
             # If no tool calls, Ralph is reporting back or done.
             # In Planning/Building mode, he effectively runs until he stops calling tools.

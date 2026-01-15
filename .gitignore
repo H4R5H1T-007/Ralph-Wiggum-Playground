@@ -1,0 +1,14 @@
+.env
+.venv
+context.md
+*IMPLEMENTATION_PLAN.md
+AGENTS.md
+
+__pycache__
+
+node_modules
+logs
+dist
+coverage
+command_history.log
+.DS_Store

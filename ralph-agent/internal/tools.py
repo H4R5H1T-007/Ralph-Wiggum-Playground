@@ -65,6 +65,17 @@ def run_command(command: str):
     Users 'docker exec' to ensure state persistence (e.g. installed packages).
     """
     try:
+        # Append command to history inside the container using a separate sh call
+        # We do this separately to ensure it logs even if the main command fails, 
+        # and to avoid complex shell escaping issues in one line.
+        try:
+             # Escape single quotes for the echo command
+             safe_cmd_str = command.replace("'", "'\\''")
+             log_cmd = ["docker", "exec", "ralph-workspace", "sh", "-c", f"echo '{safe_cmd_str}' >> /app/command_history.log"]
+             subprocess.run(log_cmd, check=False)
+        except Exception:
+             pass # Logging shouldn't crash the tool
+
         # Construct Docker Exec command
         # Interactive mode (-it) might be tricky for automation, so we use non-interactive
         docker_cmd = [

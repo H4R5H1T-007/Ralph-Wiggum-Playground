@@ -13,14 +13,20 @@ The entire "Indian Aroma" project must be built using the following stack.
 *   **Runtime**: Node.js.
 *   **Language**: TypeScript (Strict Mode).
 *   **Framework**: Express, NestJS, or Fastify (Choose one standard and stick to it).
-*   **Database**: (Implied: Ralph decides, likely SQLite/Postgres/JSON for MVP).
+*   **Database**: SQLite (Strictly required).
+*   **ORM**: Prisma or TypeORM (Recommended for type safety).
+*   **Testing**: STRICT TDD. Write tests first.
+    *   **Backend**: Jest + Supertest (Integration tests for APIs are critical).
+    *   **Frontend**: React Testing Library + Vitest.
 
 ## Quality Standards (Backpressure)
 1.  **Strict Typing**: No `any` types allowed unless absolutely necessary and commented. `tsc` must pass.
 2.  **Testing**:
+    *   **TDD Methodology**: All features must be implemented using Test-Driven Development. Create the test case (e.g., API integration test) *before* writing the implementation.
     *   **Unit Tests**: All business logic and API endpoints must have corresponding unit tests.
     *   **Framework**: Jest or Vitest.
 3.  **Linting**: Code must be clean and lint-free.
+4.  **Documentation**: All API endpoints must be documented (e.g. Swagger/OpenAPI or plain markdown).
 
 ## Implementation Guide
 *   **Monorepo**: Prefer a monorepo structure (e.g., `apps/web`, `apps/api`) or a clear structure within `src/` separation.
