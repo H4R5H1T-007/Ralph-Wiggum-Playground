@@ -14,8 +14,15 @@ SUBAGENT_MODEL = os.getenv("SUBAGENT_MODEL", RALPH_MODEL)
 
 # Paths
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-WORKSPACE_DIR = os.path.join(BASE_DIR, "workspace")
-PROMPTS_DIR = os.path.join(BASE_DIR, "prompts")
+def get_abs_path(env_var, default):
+    path = os.getenv(env_var, default)
+    # Expand ~ to user home directory
+    path = os.path.expanduser(path)
+    # Convert to absolute path
+    return os.path.abspath(path)
+
+WORKSPACE_DIR = get_abs_path("RALPH_WORKSPACE_DIR", os.path.join(BASE_DIR, "workspace"))
+PROMPTS_DIR = get_abs_path("RALPH_PROMPTS_DIR", os.path.join(BASE_DIR, "prompts"))
 INTERNAL_DIR = os.path.join(BASE_DIR, "internal")
 
 # Ensure critical directories exist
