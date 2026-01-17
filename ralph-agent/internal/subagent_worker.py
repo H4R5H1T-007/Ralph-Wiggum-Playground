@@ -39,13 +39,24 @@ def main():
 
     # Initial Context from file_paths
     initial_messages_content = ""
+    from .tools import read_file # Import locally or ensure it's available
+    
+    context_errors = []
+
     for path in file_paths:
-        try:
-            with open(path, "r", encoding="utf-8") as f:
-                content = f.read()
-                initial_messages_content += f"\n--- FILE: {os.path.basename(path)} ---\n{content}\n"
-        except Exception as e:
-            initial_messages_content += f"\n--- ERROR READING {path}: {str(e)} ---\n"
+        # Use the safe read_file tool which enforces workspace limits
+        content = read_file(path)
+        if content.startswith("Error"):
+             # If read failed, we track the error and ABORT later to notify Manager
+             context_errors.append(f"Failed to read {path}: {content}")
+        else:
+             initial_messages_content += f"\n--- FILE: {os.path.basename(path)} ---\n{content}\n"
+
+    if context_errors:
+        # Return error to Manager immediately
+        error_msg = "Context Loading Failed. The following paths were invalid or inaccessible:\n" + "\n".join(context_errors)
+        print(json.dumps({"result": error_msg, "error": error_msg})) 
+        return
 
     # Combine instructions with context
     system_prompt = f"""
