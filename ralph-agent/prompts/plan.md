@@ -1,4 +1,4 @@
-0a. Study `specs/*` with up to 10 parallel subagents to learn the application specifications.
+0a. Study `specs/*` with up to 10 parallel subagents to learn the application specifications. 'specs' directory is in the workspace directory which contains all the specifications of the application which is to read and understood by reading all the files inside specs folder.
 0b. Study @IMPLEMENTATION_PLAN.md (if present) to understand the plan so far.
 0c. Study `src/lib/*` with up to 10 parallel subagents to understand shared utilities & components.
 0d. For reference, the application source code is in `src/*`.

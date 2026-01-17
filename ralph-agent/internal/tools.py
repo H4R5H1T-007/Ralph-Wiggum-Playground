@@ -1,14 +1,8 @@
 import os
 import json
 import subprocess
-import config  # Assumes config.py is in the parent directory (ralph-agent/) but we are in internal/. 
-# We need to fix imports or path. Since we run from root, `import config` works if pythonpath is set.
-# But better to use relative imports if possible, or assume running as module.
-# Let's assume the main script sets up sys.path or we run from root.
-
-# For now, let's just re-import config logic or rely on passing config. 
-# Actually, tools.py will likely be imported by main.py in the root, so `import config` should work if running from root.
-
+import uuid
+import logging
 from config import WORKSPACE_DIR, INTERNAL_DIR, PROMPTS_DIR, OPENROUTER_API_KEY, SUBAGENT_MODEL
 
 class ToolError(Exception):
@@ -22,21 +16,17 @@ def validate_path(path: str, allow_read_only=False):
         abs_path = os.path.abspath(path)
 
     if allow_read_only and (abs_path.startswith(INTERNAL_DIR) or abs_path.startswith(PROMPTS_DIR)):
-         # Internal/Prompts are strictly read-only, but logic elsewhere enforces WRITE restrictions.
-         # For READ, we allow reading workspace. Reading internal? Maybe unsafe for the agent to read its own source?
-         # Let's STRICTLY restrict to Workspace for now, as per plan.
+         # Internal/Prompts are strictly read-only
          pass
     
     if not abs_path.startswith(os.path.abspath(WORKSPACE_DIR)):
         raise ToolError(f"Access Denied: usage restricted to configured workspace directory ({WORKSPACE_DIR}). Path: {path}")
     return abs_path
 
-# --- File System Tools ---
+# --- Implementations ---
 
 def read_file(path: str):
     try:
-        # We allow reading config/prompts if necessary? No, plan said workspace only strictly.
-        # But wait, main.py reads prompts. The AGENT (LLM) should only read workspace.
         safe_path = validate_path(path)
         with open(safe_path, "r", encoding="utf-8") as f:
             return f.read()
@@ -46,7 +36,6 @@ def read_file(path: str):
 def write_file(path: str, content: str):
     try:
         safe_path = validate_path(path)
-        # Ensure directory exists
         os.makedirs(os.path.dirname(safe_path), exist_ok=True)
         with open(safe_path, "w", encoding="utf-8") as f:
             f.write(content)
@@ -61,27 +50,18 @@ def list_dir(path: str):
     except Exception as e:
         return f"Error listing directory: {e}"
 
-# --- Execution Tools ---
-
 def run_command(command: str):
-    """
-    Executes a command inside the persistent 'ralph-workspace' container.
-    Users 'docker exec' to ensure state persistence (e.g. installed packages).
-    """
+    """Executes a command inside the persistent 'ralph-workspace' container."""
     try:
-        # Append command to history inside the container using a separate sh call
-        # We do this separately to ensure it logs even if the main command fails, 
-        # and to avoid complex shell escaping issues in one line.
+        # Log command
         try:
-             # Escape single quotes for the echo command
              safe_cmd_str = command.replace("'", "'\\''")
              log_cmd = ["docker", "exec", "ralph-workspace", "sh", "-c", f"echo '{safe_cmd_str}' >> {WORKSPACE_DIR}/command_history.log"]
              subprocess.run(log_cmd, check=False)
         except Exception:
-             pass # Logging shouldn't crash the tool
+             pass 
 
-        # Construct Docker Exec command
-        # Interactive mode (-it) might be tricky for automation, so we use non-interactive
+        # Execute
         docker_cmd = [
             "docker", "exec", 
             "-w", WORKSPACE_DIR,
@@ -99,17 +79,10 @@ def run_command(command: str):
         return f"Docker Execution Error: {e}"
 
 def git_commit(message: str):
-    """
-    Executes 'git add -A' and 'git commit -m' inside the container.
-    Returns the output of the commit command.
-    """
     try:
-        # 1. Git Add
         add_cmd = ["docker", "exec", "-w", WORKSPACE_DIR, "ralph-workspace", "/bin/sh", "-c", "git add -A"]
         subprocess.run(add_cmd, check=True, capture_output=True)
 
-        # 2. Git Commit
-        # Escape quotes for the shell
         safe_message = message.replace('"', '\\"')
         commit_cmd = ["docker", "exec", "-w", WORKSPACE_DIR, "ralph-workspace", "/bin/sh", "-c", f'git commit -m "{safe_message}"']
         
@@ -125,30 +98,29 @@ def git_commit(message: str):
     except Exception as e:
         return f"Git Execution Error: {e}"
 
-# --- Subagent Tools ---
-
 def _run_subagent_process(instructions, file_paths):
     """Internal helper to run worker process."""
     worker_path = os.path.join(INTERNAL_DIR, "subagent_worker.py")
+    subagent_id = str(uuid.uuid4())[:8] # Short ID
     
-    # Validate file paths (subagents should also strictly read from workspace)
     safe_paths = []
     for p in file_paths:
         try:
-            safe_paths.append(validate_path(p))
+            safe_paths.append(validate_path(p, allow_read_only=True)) 
         except Exception:
-            # If a path is invalid, we just skip it or warn?
-            # Let's fail safe.
-            return f"Error: Subagent file path out of bounds: {p}"
+             continue 
 
     payload = {
         "api_key": OPENROUTER_API_KEY,
         "model": SUBAGENT_MODEL,
         "instructions": instructions,
-        "file_paths": safe_paths
+        "file_paths": safe_paths,
+        "subagent_id": subagent_id
     }
 
     try:
+        logging.info(f"[{subagent_id}] Spawning Subagent...")
+        
         process = subprocess.Popen(
             ["python3", worker_path],
             stdin=subprocess.PIPE,
@@ -158,28 +130,36 @@ def _run_subagent_process(instructions, file_paths):
         )
         stdout, stderr = process.communicate(input=json.dumps(payload))
         
+        # Capture and log stderr from subagent
         if stderr:
-            # Worker might print unexpected stderr (like 'using device cpu'), so we check stdout for result
-            pass
+            for line in stderr.splitlines():
+                if line.strip():
+                    logging.info(f"[{subagent_id}] {line}")
 
         try:
             result_json = json.loads(stdout)
             if "error" in result_json:
-                return f"Subagent Error: {result_json['error']}"
-            return result_json.get("result", "No response from subagent.")
+                error_msg = result_json['error']
+                logging.error(f"[{subagent_id}] Error: {error_msg}")
+                return f"Subagent Error: {error_msg}"
+            
+            result_msg = result_json.get("result", "No response from subagent.")
+            logging.info(f"[{subagent_id}] Finished successfully.")
+            return result_msg
+            
         except json.JSONDecodeError:
-            return f"Subagent Failure. Output: {stdout} | Error: {stderr}"
+            error_details = f"Output: {stdout} | Error: {stderr}"
+            logging.error(f"[{subagent_id}] JSON Decode Fail: {error_details}")
+            return f"Subagent Failure. {error_details}"
             
     except Exception as e:
+        logging.error(f"[{subagent_id}] Process Error: {e}")
         return f"Subagent Process Error: {e}"
 
 def study_specs(spec_paths: list[str], focus_question: str):
     instructions = f"""
     You are a Lead QA Analyst. 
-    Your goal is to understand the requirements from the provided specifications.
-    
     Focus Question: {focus_question}
-    
     Analyze the attached spec files deeply. 
     Return a clear, concise summary answering the focus question.
     """
@@ -188,9 +168,7 @@ def study_specs(spec_paths: list[str], focus_question: str):
 def study_code(file_paths: list[str], query: str):
     instructions = f"""
     You are a Senior Software Engineer.
-    
     Query: {query}
-    
     Analyze the attached source code files.
     Explain the logic, structure, or answer the specific query provided.
     """
@@ -198,3 +176,139 @@ def study_code(file_paths: list[str], query: str):
 
 def delegate_subagent(instructions: str, file_paths: list[str]):
     return _run_subagent_process(instructions, file_paths)
+
+
+# --- Tool Definitions ---
+
+READ_FILE_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "read_file",
+        "description": "Read content of a file from workspace.",
+        "parameters": {
+            "type": "object",
+            "properties": {"path": {"type": "string", "description": "Path to file"}},
+            "required": ["path"]
+        }
+    }
+}
+
+WRITE_FILE_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "write_file",
+        "description": "Write content to a file in workspace.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string", "description": "Path to file"},
+                "content": {"type": "string", "description": "Content to write"}
+            },
+            "required": ["path", "content"]
+        }
+    }
+}
+
+LIST_DIR_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "list_dir",
+        "description": "List files in a directory.",
+        "parameters": {
+            "type": "object",
+            "properties": {"path": {"type": "string", "description": "Directory path"}},
+            "required": ["path"]
+        }
+    }
+}
+
+RUN_COMMAND_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "run_command",
+        "description": "Run a shell command inside the persistent workspace container.",
+        "parameters": {
+            "type": "object",
+            "properties": {"command": {"type": "string", "description": "Command to run"}},
+            "required": ["command"]
+        }
+    }
+}
+
+GIT_COMMIT_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "git_commit",
+        "description": "Commit changes to git. This signals the completion of your task.",
+        "parameters": {
+            "type": "object",
+            "properties": {"message": {"type": "string", "description": "Commit message"}},
+            "required": ["message"]
+        }
+    }
+}
+
+DELEGATE_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "delegate_subagent",
+        "description": "Delegate a coding or analysis task to a subagent.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "instructions": {"type": "string"},
+                "file_paths": {"type": "array", "items": {"type": "string"}}
+            },
+            "required": ["instructions"]
+        }
+    }
+}
+
+STUDY_SPECS_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "study_specs",
+        "description": "Spawn subagent to analyze specs.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "spec_paths": {"type": "array", "items": {"type": "string"}},
+                "focus_question": {"type": "string"}
+            },
+            "required": ["spec_paths", "focus_question"]
+        }
+    }
+}
+
+STUDY_CODE_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "study_code",
+        "description": "Analyze logic across multiple files efficiently.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "file_paths": {"type": "array", "items": {"type": "string"}},
+                "query": {"type": "string"}
+            },
+            "required": ["file_paths", "query"]
+        }
+    }
+}
+
+# --- Exported Sets ---
+
+COMMON_TOOLS = [READ_FILE_TOOL, LIST_DIR_TOOL]
+AUTHOR_TOOLS = [WRITE_FILE_TOOL]
+MANAGER_TOOLS = [RUN_COMMAND_TOOL, GIT_COMMIT_TOOL, DELEGATE_TOOL, STUDY_SPECS_TOOL, STUDY_CODE_TOOL]
+
+TOOL_FUNCTIONS = {
+    "read_file": read_file,
+    "write_file": write_file,
+    "list_dir": list_dir,
+    "run_command": run_command,
+    "git_commit": git_commit,
+    "delegate_subagent": delegate_subagent,
+    "study_specs": study_specs,
+    "study_code": study_code
+}
