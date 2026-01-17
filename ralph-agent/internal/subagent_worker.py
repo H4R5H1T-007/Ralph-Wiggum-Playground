@@ -52,11 +52,11 @@ def main():
         else:
              initial_messages_content += f"\n--- FILE: {os.path.basename(path)} ---\n{content}\n"
 
-    if context_errors:
-        # Return error to Manager immediately
-        error_msg = "Context Loading Failed. The following paths were invalid or inaccessible:\n" + "\n".join(context_errors)
-        print(json.dumps({"result": error_msg, "error": error_msg})) 
-        return
+    # if context_errors:
+    #     # Return error to Manager immediately
+    #     error_msg = "Context Loading Failed. The following paths were invalid or inaccessible:\n" + "\n".join(context_errors)
+    #     print(json.dumps({"result": error_msg, "error": error_msg})) 
+    #     return
 
     # Combine instructions with context
     system_prompt = f"""
@@ -96,8 +96,9 @@ def main():
     original_stdout = sys.stdout
     sys.stdout = sys.stderr
     
+    import config # Import config to get limits
     try:
-        final_status = agent.run_loop(max_steps=20) 
+        final_status = agent.run_loop(max_steps=config.SUBAGENT_MAX_STEPS) 
         last_message = agent.messages[-1].content
     except Exception as e:
         last_message = f"Error: {str(e)}"

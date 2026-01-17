@@ -28,6 +28,12 @@ def validate_path(path: str, allow_read_only=False):
 def read_file(path: str):
     try:
         safe_path = validate_path(path)
+        
+        # Check if it's a directory
+        if os.path.isdir(safe_path):
+            dir_contents = list_dir(path)
+            return f"Error: '{path}' is a directory, not a file. Implementation: {dir_contents}"
+            
         with open(safe_path, "r", encoding="utf-8") as f:
             return f.read()
     except Exception as e:
@@ -118,11 +124,14 @@ def _run_subagent_process(instructions, file_paths):
         "subagent_id": subagent_id
     }
 
+    # Run as a module (python3 -m internal.subagent_worker) to resolve relative imports
+    # We assume CWD is the root 'ralph-agent' directory, which is standard for main.py execution.
     try:
         logging.info(f"[{subagent_id}] Spawning Subagent...")
         
         process = subprocess.Popen(
-            ["python3", worker_path],
+            ["python3", "-m", "internal.subagent_worker"],
+            cwd=os.path.dirname(INTERNAL_DIR), # Ensure we run from the parent of 'internal' (i.e., root)
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,

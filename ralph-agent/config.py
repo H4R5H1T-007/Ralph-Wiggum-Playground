@@ -12,6 +12,10 @@ if not OPENROUTER_API_KEY:
 RALPH_MODEL = os.getenv("RALPH_MODEL", "google/gemini-flash-1.5")
 SUBAGENT_MODEL = os.getenv("SUBAGENT_MODEL", RALPH_MODEL)
 
+# Agent Loop Limits
+MAIN_AGENT_MAX_STEPS = int(os.getenv("RALPH_MAIN_MAX_STEPS", "200"))
+SUBAGENT_MAX_STEPS = int(os.getenv("RALPH_SUBAGENT_MAX_STEPS", "100"))
+
 # Paths
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 def get_abs_path(env_var, default):

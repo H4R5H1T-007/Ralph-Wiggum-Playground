@@ -10,8 +10,35 @@ class RalphAgent:
         self.model = model
         self.tools = tools
         self.name = name
-        self.messages = [{"role": "system", "content": system_prompt}]
         self.logger = logging.getLogger(name)
+        
+        # Dynamic Tool Manifest
+        tool_manifest = self._generate_tool_manifest(tools)
+        full_system_prompt = f"{system_prompt}\n\n## AVAILABLE TOOLS\n{tool_manifest}"
+        
+        self.messages = [{"role": "system", "content": full_system_prompt}]
+
+    def _generate_tool_manifest(self, tools: list) -> str:
+        if not tools:
+            return "No tools available."
+        
+        manifest = []
+        for tool in tools:
+            fn = tool.get("function", {})
+            name = fn.get("name", "Unknown")
+            desc = fn.get("description", "No description")
+            params = fn.get("parameters", {}).get("properties", {})
+            
+            param_str = []
+            for p_name, p_attrs in params.items():
+                p_desc = p_attrs.get("description", "")
+                param_str.append(f"  - `{p_name}`: {p_desc}")
+            
+            manifest.append(f"### {name}\n{desc}")
+            if param_str:
+                manifest.append("Arguments:\n" + "\n".join(param_str))
+            
+        return "\n\n".join(manifest)
 
     def add_message(self, role: str, content: str):
         self.messages.append({"role": role, "content": content})

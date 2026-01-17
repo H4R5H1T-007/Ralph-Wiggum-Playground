@@ -64,7 +64,7 @@ def main():
             print(colored(f"Error loading AGENTS.md: {e}", "red"))
 
     # Run Loop
-    exit_status = agent.run_loop(max_steps=100)
+    exit_status = agent.run_loop(max_steps=config.MAIN_AGENT_MAX_STEPS)
     
     # If the helper returns "DONE" via git commit, we exit 0 to restart.
     if exit_status == "DONE":
