@@ -15,8 +15,12 @@ class ToolError(Exception):
     pass
 
 def validate_path(path: str, allow_read_only=False):
-    """Ensures path is within WORKSPACE_DIR."""
-    abs_path = os.path.abspath(path)
+    """Ensures path is within WORKSPACE_DIR. Resolves relative paths against WORKSPACE_DIR."""
+    if not os.path.isabs(path):
+        abs_path = os.path.abspath(os.path.join(WORKSPACE_DIR, path))
+    else:
+        abs_path = os.path.abspath(path)
+
     if allow_read_only and (abs_path.startswith(INTERNAL_DIR) or abs_path.startswith(PROMPTS_DIR)):
          # Internal/Prompts are strictly read-only, but logic elsewhere enforces WRITE restrictions.
          # For READ, we allow reading workspace. Reading internal? Maybe unsafe for the agent to read its own source?
@@ -24,7 +28,7 @@ def validate_path(path: str, allow_read_only=False):
          pass
     
     if not abs_path.startswith(os.path.abspath(WORKSPACE_DIR)):
-        raise ToolError(f"Access Denied: usage restricted to workspace/ directory. Path: {path}")
+        raise ToolError(f"Access Denied: usage restricted to configured workspace directory ({WORKSPACE_DIR}). Path: {path}")
     return abs_path
 
 # --- File System Tools ---
@@ -71,7 +75,7 @@ def run_command(command: str):
         try:
              # Escape single quotes for the echo command
              safe_cmd_str = command.replace("'", "'\\''")
-             log_cmd = ["docker", "exec", "ralph-workspace", "sh", "-c", f"echo '{safe_cmd_str}' >> /app/command_history.log"]
+             log_cmd = ["docker", "exec", "ralph-workspace", "sh", "-c", f"echo '{safe_cmd_str}' >> {WORKSPACE_DIR}/command_history.log"]
              subprocess.run(log_cmd, check=False)
         except Exception:
              pass # Logging shouldn't crash the tool
@@ -80,7 +84,7 @@ def run_command(command: str):
         # Interactive mode (-it) might be tricky for automation, so we use non-interactive
         docker_cmd = [
             "docker", "exec", 
-            "-w", "/app",
+            "-w", WORKSPACE_DIR,
             "ralph-workspace", 
             "/bin/sh", "-c", command
         ]
@@ -101,13 +105,13 @@ def git_commit(message: str):
     """
     try:
         # 1. Git Add
-        add_cmd = ["docker", "exec", "-w", "/app", "ralph-workspace", "/bin/sh", "-c", "git add -A"]
+        add_cmd = ["docker", "exec", "-w", WORKSPACE_DIR, "ralph-workspace", "/bin/sh", "-c", "git add -A"]
         subprocess.run(add_cmd, check=True, capture_output=True)
 
         # 2. Git Commit
         # Escape quotes for the shell
         safe_message = message.replace('"', '\\"')
-        commit_cmd = ["docker", "exec", "-w", "/app", "ralph-workspace", "/bin/sh", "-c", f'git commit -m "{safe_message}"']
+        commit_cmd = ["docker", "exec", "-w", WORKSPACE_DIR, "ralph-workspace", "/bin/sh", "-c", f'git commit -m "{safe_message}"']
         
         result = subprocess.run(commit_cmd, capture_output=True, text=True)
         

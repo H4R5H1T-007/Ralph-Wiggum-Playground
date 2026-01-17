@@ -9,6 +9,20 @@ if [ ! -f .env ]; then
     echo "Error: .env file not found. Please copy .env.example to .env and set your keys."
     exit 1
 fi
+    
+# Virtual Environment Setup
+if [ ! -d ".venv" ]; then
+    echo "Creating virtual environment..."
+    python3 -m venv .venv
+fi
+
+source .venv/bin/activate
+
+# Install Dependencies
+if [ -f "requirements.txt" ]; then
+    echo "Installing/Updating dependencies..."
+    pip install -q -r requirements.txt
+fi
 
 MODE=$1
 MAX_ITERATIONS=${2:-1} # Default to 1 iteration if not specified. Set to 0 for infinite.
@@ -19,6 +33,10 @@ if [ -z "$MODE" ]; then
 fi
 
 ITERATION=0
+
+# Initialize Workspace Container
+echo "Initializing Workspace..."
+python -m internal.startup
 
 while true; do
     # Check iteration limit
@@ -31,7 +49,7 @@ while true; do
     echo "Running Ralph in $MODE mode (Iteration $((ITERATION+1)))"
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     
-    python3 -m internal.main "$MODE"
+    python -m internal.main "$MODE"
     
     ITERATION=$((ITERATION + 1))
     
