@@ -3,6 +3,7 @@ import logging
 from openai import OpenAI
 from termcolor import colored
 from .tools import TOOL_FUNCTIONS
+from .tool_manager import ToolManager
 
 class RalphAgent:
     def __init__(self, client: OpenAI, model: str, system_prompt: str, tools: list, name: str = "Ralph"):
@@ -11,6 +12,7 @@ class RalphAgent:
         self.tools = tools
         self.name = name
         self.logger = logging.getLogger(name)
+        self.tool_manager = ToolManager(logger_name=f"{name}.ToolManager")
         
         # Dynamic Tool Manifest
         tool_manifest = self._generate_tool_manifest(tools)
@@ -65,42 +67,22 @@ class RalphAgent:
         if not message.tool_calls:
             return "No tool calls"
 
-        results = []
-        for tool_call in message.tool_calls:
-            func_name = tool_call.function.name
-            func_args_str = tool_call.function.arguments
-            
-            print(colored(f"{self.name} calls Tool: {func_name}", "yellow"))
-            self.logger.info(f"Tool Call: {func_name} | Args: {func_args_str}")
-
-            try:
-                args = json.loads(func_args_str)
-                func = TOOL_FUNCTIONS.get(func_name)
-                
-                if not func:
-                    result = f"Error: Unknown tool '{func_name}'"
-                else:
-                    result = func(**args)
-                
-            except json.JSONDecodeError:
-                result = "Error: Invalid JSON arguments"
-            except Exception as e:
-                result = f"Error executing tool '{func_name}': {str(e)}"
-            
-            self.logger.info(f"Tool Result ({func_name}): {result}")
-            
-            # Append result
+        # Delegate execution to ToolManager (Parallel)
+        tool_outputs = self.tool_manager.execute_tool_calls(message.tool_calls)
+        
+        # Append results to history and check for exit signals
+        for output in tool_outputs:
             self.messages.append({
                 "role": "tool",
-                "tool_call_id": tool_call.id,
-                "content": str(result)
+                "tool_call_id": output["tool_call_id"],
+                "content": output["content"]
             })
             
-            # Special Handling for Git Commit (Exit Signal for Main Agent)
-            if func_name == "git_commit":
+            # Check for Git Commit Signal
+            if output["name"] == "git_commit":
+                # If ANY tool was a git commit, we signal done. 
+                # (Assuming nice behavior where commit is the final action)
                 return "GIT_COMMIT_SIGNAL"
-                
-            results.append(result)
 
         return "Tool calls executed"
 

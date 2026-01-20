@@ -3,33 +3,35 @@ import json
 import os
 import logging
 from openai import OpenAI
-from .agent import RalphAgent
-from .tools import COMMON_TOOLS, AUTHOR_TOOLS
+# Import config here to ensure env vars are loaded if needed
+import config
 
-def main():
-    # Configure logging to output to stderr (which parent captures)
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s - %(levelname)s - %(message)s",
-        stream=sys.stderr
-    )
+# Note: We avoid top-level imports of .agent or .tools to prevent circular dependencies
+# when this module is imported by tools.py
 
-    # Read input from stdin
-    try:
-        input_data = json.load(sys.stdin)
-    except json.JSONDecodeError:
-        print(json.dumps({"error": "Invalid JSON input"}), file=sys.stderr)
-        return
+def run_worker(payload: dict) -> str:
+    """
+    Executes the subagent logic in the current process.
+    designed to be called by ProcessPoolExecutor.
+    """
+    # Local imports to break cycles
+    from .agent import RalphAgent
+    from .tools import COMMON_TOOLS, AUTHOR_TOOLS
 
-    api_key = input_data.get("api_key")
-    model = input_data.get("model")
-    instructions = input_data.get("instructions")
-    file_paths = input_data.get("file_paths", [])
-    subagent_id = input_data.get("subagent_id", "Unknown")
+    api_key = payload.get("api_key")
+    model = payload.get("model")
+    instructions = payload.get("instructions")
+    file_paths = payload.get("file_paths", [])
+    subagent_id = payload.get("subagent_id", "Unknown")
 
     if not api_key:
-        print(json.dumps({"error": "Missing API Key"}), file=sys.stderr)
-        return
+        return "Error: Missing API Key"
+
+    # Configure Logging for this worker (using a distinct logger per subagent might be noisy, 
+    # but since we are in a process pool, basic config might conflict if not careful.
+    # We'll rely on the parent process/standard logging or just print to stderr if needed for debugging.)
+    # In a ProcessPool, logging setup in main might be inherited or need re-setup.
+    # For now, we continue to use the established logger or just print logic from the original agent.
 
     # Initialize Client
     client = OpenAI(
@@ -39,24 +41,16 @@ def main():
 
     # Initial Context from file_paths
     initial_messages_content = ""
-    from .tools import read_file # Import locally or ensure it's available
+    from .tools import read_file 
     
     context_errors = []
 
     for path in file_paths:
-        # Use the safe read_file tool which enforces workspace limits
         content = read_file(path)
         if content.startswith("Error"):
-             # If read failed, we track the error and ABORT later to notify Manager
              context_errors.append(f"Failed to read {path}: {content}")
         else:
              initial_messages_content += f"\n--- FILE: {os.path.basename(path)} ---\n{content}\n"
-
-    # if context_errors:
-    #     # Return error to Manager immediately
-    #     error_msg = "Context Loading Failed. The following paths were invalid or inaccessible:\n" + "\n".join(context_errors)
-    #     print(json.dumps({"result": error_msg, "error": error_msg})) 
-    #     return
 
     # Combine instructions with context
     system_prompt = f"""
@@ -75,7 +69,7 @@ def main():
     
     GOAL:
     Perform the requested task (editing code, analyzing).
-    When finished, output 'DONE'.
+    When finished, output 'DONE' or if you think you need anything in environment before you can finish, output your request to manager.
     """
 
     # Subagent Tools: Common + Author
@@ -91,24 +85,34 @@ def main():
 
     agent.add_message("user", "Please start working on the instructions.")
     
-    # Dirty Hack: Redirect stdout to stderr for the duration of the agent run
-    # to protect the final JSON output from any rogue print statements in agent/libraries.
-    original_stdout = sys.stdout
-    sys.stdout = sys.stderr
+    # We capture stdout/stderr to prevent cluttering the main terminal?
+    # Actually, in ProcessPool, printing goes to the main stdout nicely usually.
+    # The user wanted centralized management.
+    # We will just run the loop.
     
-    import config # Import config to get limits
     try:
         final_status = agent.run_loop(max_steps=config.SUBAGENT_MAX_STEPS) 
         last_message = agent.messages[-1].content
+        return last_message
     except Exception as e:
-        last_message = f"Error: {str(e)}"
-        logging.error(f"Agent Loop Error: {e}")
+        return f"Subagent Error: {str(e)}"
 
-    # Restore stdout
-    sys.stdout = original_stdout
-    
-    # Output Result
-    print(json.dumps({"result": last_message}))
+def main():
+    """Legacy entry point for stdin/stdout usage (if needed)"""
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s - %(levelname)s - %(message)s",
+        stream=sys.stderr
+    )
+
+    try:
+        input_data = json.load(sys.stdin)
+    except json.JSONDecodeError:
+        print(json.dumps({"error": "Invalid JSON input"}), file=sys.stderr)
+        return
+
+    result = run_worker(input_data)
+    print(json.dumps({"result": result}))
 
 if __name__ == "__main__":
     main()

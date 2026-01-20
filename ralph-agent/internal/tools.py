@@ -105,8 +105,10 @@ def git_commit(message: str):
         return f"Git Execution Error: {e}"
 
 def _run_subagent_process(instructions, file_paths):
-    """Internal helper to run worker process."""
-    worker_path = os.path.join(INTERNAL_DIR, "subagent_worker.py")
+    """Internal helper to run worker."""
+    # Local import to avoid cycle
+    from .subagent_worker import run_worker
+
     subagent_id = str(uuid.uuid4())[:8] # Short ID
     
     safe_paths = []
@@ -115,7 +117,7 @@ def _run_subagent_process(instructions, file_paths):
             safe_paths.append(validate_path(p, allow_read_only=True)) 
         except Exception:
              continue 
-
+            
     payload = {
         "api_key": OPENROUTER_API_KEY,
         "model": SUBAGENT_MODEL,
@@ -123,47 +125,11 @@ def _run_subagent_process(instructions, file_paths):
         "file_paths": safe_paths,
         "subagent_id": subagent_id
     }
-
-    # Run as a module (python3 -m internal.subagent_worker) to resolve relative imports
-    # We assume CWD is the root 'ralph-agent' directory, which is standard for main.py execution.
-    try:
-        logging.info(f"[{subagent_id}] Spawning Subagent...")
-        
-        process = subprocess.Popen(
-            ["python3", "-m", "internal.subagent_worker"],
-            cwd=os.path.dirname(INTERNAL_DIR), # Ensure we run from the parent of 'internal' (i.e., root)
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True
-        )
-        stdout, stderr = process.communicate(input=json.dumps(payload))
-        
-        # Capture and log stderr from subagent
-        if stderr:
-            for line in stderr.splitlines():
-                if line.strip():
-                    logging.info(f"[{subagent_id}] {line}")
-
-        try:
-            result_json = json.loads(stdout)
-            if "error" in result_json:
-                error_msg = result_json['error']
-                logging.error(f"[{subagent_id}] Error: {error_msg}")
-                return f"Subagent Error: {error_msg}"
-            
-            result_msg = result_json.get("result", "No response from subagent.")
-            logging.info(f"[{subagent_id}] Finished successfully.")
-            return result_msg
-            
-        except json.JSONDecodeError:
-            error_details = f"Output: {stdout} | Error: {stderr}"
-            logging.error(f"[{subagent_id}] JSON Decode Fail: {error_details}")
-            return f"Subagent Failure. {error_details}"
-            
-    except Exception as e:
-        logging.error(f"[{subagent_id}] Process Error: {e}")
-        return f"Subagent Process Error: {e}"
+    
+    logging.info(f"[{subagent_id}] Subagent Starting...")
+    result = run_worker(payload)
+    logging.info(f"[{subagent_id}] Subagent Finished. Result len: {len(result)}")
+    return result
 
 def study_specs(spec_paths: list[str], focus_question: str):
     instructions = f"""
