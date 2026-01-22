@@ -1,0 +1,11 @@
+version: '3.8'
+
+services:
+  ralph-workspace:
+    image: alpine:latest
+    container_name: ralph-workspace
+    volumes:
+      - ${RALPH_WORKSPACE_DIR:-./workspace}:${RALPH_WORKSPACE_DIR:-/app}
+    working_dir: ${RALPH_WORKSPACE_DIR:-/app}
+    command: tail -f /dev/null
+    restart: always

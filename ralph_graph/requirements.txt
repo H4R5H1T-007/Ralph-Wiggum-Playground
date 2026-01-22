@@ -1,0 +1,7 @@
+openai>=1.0.0
+python-dotenv
+termcolor
+langgraph
+langchain-openai
+langchain-core
+termcolor
