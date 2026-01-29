@@ -2,6 +2,10 @@ import os
 import subprocess
 import sys
 from termcolor import colored
+
+# Add current dir to path to find local modules if needed
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+
 from config import WORKSPACE_DIR, BASE_DIR
 
 def ensure_workspace_container():

@@ -1,5 +1,6 @@
 import os
 import sys
+import tiktoken
 from langchain_core.messages import SystemMessage, AIMessage
 from termcolor import colored
 
@@ -15,10 +16,12 @@ def main():
     logger.info(colored("Initializing Ralph Graph Agent Loop...", "cyan"))
     
     # 1. Load or Initialize State
-    state = load_state()
+    # state = load_state() 
+    state = None # Force fresh start
     
     if not state:
-        logger.info("No existing state found. Starting fresh.")
+        # logger.info("No existing state found. Starting fresh.")
+        logger.info("Initializing fresh state (Persistence Disabled).")
         # Load Initial Prompt
         build_prompt_path = os.path.join(PROMPTS_DIR, "build.md")
         try:
@@ -34,8 +37,8 @@ def main():
             "results": {},
             "iteration": 0
         }
-    else:
-        logger.info("Resuming from previous state.")
+    # else:
+    #     logger.info("Resuming from previous state.")
 
     # 2. Create the graph
     app = create_graph()
@@ -44,6 +47,21 @@ def main():
     try:
         while True:
             current_iter = state.get("iteration", 0)
+            
+            # --- Context Length Logging ---
+            try:
+                enc = tiktoken.encoding_for_model("gpt-4")
+                # Estimate token count from messages
+                # Simple approximation: content of all messages
+                all_text = ""
+                for msg in state["messages"]:
+                    all_text += msg.content + "\n"
+                token_count = len(enc.encode(all_text))
+                logger.info(colored(f"Context Length: {token_count} tokens", "yellow"))
+            except Exception as e:
+                logger.warning(f"Failed to calculate token count: {e}")
+            # ------------------------------
+
             logger.info(colored(f"--- Iteration {current_iter + 1} ---", "blue"))
             
             # Run one pass of the DAG
@@ -52,7 +70,7 @@ def main():
             
             # Validate result (Graph might return partial state updates, but StateGraph usually returns full state)
             state = result
-            # state["iteration"] = current_iter + 1 # Iteration is updated in state, but we don't need to check it for termination
+            state["iteration"] = current_iter + 1 # Iteration is updated in state, but we don't need to check it for termination
             
             # Save state - DISABLED per user request (State maintained in memory)
             # save_state(state)
@@ -95,10 +113,10 @@ def main():
                  
     except KeyboardInterrupt:
         logger.info("🛑 User interrupted execution.")
-        save_state(state)
+        # save_state(state)
     except Exception as e:
         logger.error(f"❌ Loop Error: {e}")
-        save_state(state)
+        # save_state(state)
         raise e
 
 if __name__ == "__main__":
