@@ -1,7 +1,8 @@
 import os
 import subprocess
+import requests
 from langchain_core.tools import tool
-from config import WORKSPACE_DIR
+from config import WORKSPACE_DIR, CONTEXT7_API_KEY
 from logger import logger
 
 from functools import wraps
@@ -159,3 +160,84 @@ def git_commit(message: str) -> str:
         return f"Git Error (Add/Commit failed): {e}"
     except Exception as e:
         return f"Git Execution Error: {e}"
+
+@tool
+@log_tool_usage
+def context7_tool(query: str, library_name: str) -> str:
+    """
+    Fetch up-to-date documentation using Context7.
+    
+    Args:
+        query: The specific question or feature to look up (e.g. "connection string format", "how to use actions").
+        library_name: The name of the library (e.g. "prisma", "react", "next.js").
+    
+    Returns:
+        Relevant documentation snippets.
+    """
+    try:
+        headers = {}
+        if CONTEXT7_API_KEY:
+            headers["Authorization"] = f"Bearer {CONTEXT7_API_KEY}"
+            
+        # Step 1: Search for valid library ID
+        search_url = "https://context7.com/api/v2/libs/search"
+        search_params = {"libraryName": library_name, "query": query}
+        
+        search_response = requests.get(search_url, headers=headers, params=search_params)
+        search_response.raise_for_status()
+        
+        search_data = search_response.json()
+        libraries = search_data.get("results", []) if isinstance(search_data, dict) else search_data
+        
+        if not libraries:
+            return f"Context7: No library found for '{library_name}'."
+            
+        # Use top match
+        best_match = libraries[0]
+        library_id = best_match.get("id")
+        library_real_name = best_match.get("title")
+        
+        if not library_id:
+             return f"Context7: Invalid library data found for '{library_name}'."
+
+        # Step 2: Get Context
+        context_url = "https://context7.com/api/v2/context"
+        context_params = {
+            "libraryId": library_id,
+            "query": query,
+            "type": "json" 
+        }
+        
+        context_response = requests.get(context_url, headers=headers, params=context_params)
+        context_response.raise_for_status()
+        
+        c_data = context_response.json()
+        
+        code_snippets = c_data.get("codeSnippets", [])
+        info_snippets = c_data.get("infoSnippets", [])
+        
+        if not code_snippets and not info_snippets:
+            return f"Context7: Found library '{library_real_name}' but no documentation returned for query '{query}'."
+            
+        output = [f"--- Context7 Results for '{library_real_name}' ---"]
+        
+        for snippet in code_snippets:
+            title = snippet.get("codeTitle", "Untitled")
+            desc = snippet.get("codeDescription", "")
+            output.append(f"\nTitle: {title}\nDescription: {desc}")
+            
+            code_list = snippet.get("codeList", [])
+            for code_item in code_list:
+                lang = code_item.get("language", "")
+                code = code_item.get("code", "")
+                output.append(f"Code ({lang}):\n{code}")
+        
+        for snippet in info_snippets:
+             title = snippet.get("title", "Untitled")
+             content = snippet.get("content", "")
+             output.append(f"\nTitle: {title}\nContent: {content}")
+             
+        return "\n".join(output)
+
+    except Exception as e:
+        return f"Context7 Error: {e}"

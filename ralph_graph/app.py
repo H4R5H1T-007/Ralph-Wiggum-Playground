@@ -12,6 +12,7 @@ from nodes import (
     worker_node,
     command_node,
     admin_node,
+    research_node,
     reduce_node
 )
 
@@ -24,6 +25,7 @@ def create_graph():
     workflow.add_node("worker", worker_node)
     workflow.add_node("command", command_node)
     workflow.add_node("admin", admin_node)
+    workflow.add_node("research", research_node)
     workflow.add_node("reducer", reduce_node)
     
     # 2. Add Edges
@@ -43,13 +45,14 @@ def create_graph():
     workflow.add_conditional_edges(
         "dispatcher", 
         dispatch_logic,
-        ["worker", "admin", "command", "reducer"] 
+        ["worker", "admin", "command", "research", "reducer"] 
     )
     
     # Workers return to reducer
     workflow.add_edge("worker", "reducer")
     workflow.add_edge("command", "reducer")
     workflow.add_edge("admin", "reducer")
+    workflow.add_edge("research", "reducer")
     
     # Reducer returns to END (Loop handled by main.py)
     workflow.add_edge("reducer", END)

@@ -5,6 +5,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
+CONTEXT7_API_KEY = os.getenv("CONTEXT7_API_KEY")
 
 # Model Configuration
 RALPH_MODEL = os.getenv("RALPH_MODEL", "google/gemini-flash-1.5")

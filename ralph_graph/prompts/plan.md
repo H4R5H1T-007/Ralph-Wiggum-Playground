@@ -7,4 +7,10 @@
 
 IMPORTANT: Plan only. Do NOT implement anything. Do NOT assume functionality is missing; confirm with code search first. Treat `src/lib` as the project's standard library for shared utilities and components. Prefer consolidated, idiomatic implementations there over ad-hoc copies.
 
+RESEARCH: If you are unsure about the usage of a library (especially new versions like Prisma 7, Next.js 14+, etc.), DO NOT GUESS. Use `DelegateResearch` to look up the documentation via Context7.
+- **Critical**: Use specific, technical queries.
+- **Bad**: `query="how do I do the thing with the users"`
+- **Good**: `query="prisma client create user example"` or `query="prisma schema datasource url"`
+For example, `DelegateResearch(query="connection string format", library_name="prisma")`.
+
 ULTIMATE GOAL: We want to achieve complete Indian Aroma web and API applications. Consider missing elements and plan accordingly. If an element is missing, search first to confirm it doesn't exist, then if needed author the specification at specs/FILENAME.md. If you create a new element then document the plan to implement it in @IMPLEMENTATION_PLAN.md.

@@ -1,5 +1,6 @@
 import json
 import logging
+import tiktoken
 from typing import List, Annotated, Literal, Any, Dict
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import SystemMessage, HumanMessage, ToolMessage, AIMessage, BaseMessage
@@ -10,7 +11,7 @@ from langgraph.types import Send
 from pydantic import BaseModel, Field
 
 from config import RALPH_MODEL, SUBAGENT_MODEL, OPENROUTER_API_KEY, PROMPTS_DIR, WORKSPACE_DIR
-from tools import read_file, list_dir, write_file, run_command, git_commit
+from tools import read_file, list_dir, write_file, run_command, git_commit, context7_tool
 from state import AgentState, WorkerTask
 from logger import logger
 
@@ -26,6 +27,8 @@ subagent_llm = ChatOpenAI(
     api_key=OPENROUTER_API_KEY,
     base_url="https://openrouter.ai/api/v1"
 )
+
+TOKEN_LIMIT = 30000
 
 # --- WORKER SUB-AGENTS ---
 
@@ -50,6 +53,13 @@ def create_admin_agent():
 
 admin_agent = create_admin_agent()
 
+def create_research_agent():
+    """Creates a ReAct agent for research using Context7."""
+    tools = [context7_tool]
+    return create_react_agent(subagent_llm, tools)
+
+research_agent = create_research_agent()
+
 # --- MANAGER TOOLS ---
 
 class PlanTasks(BaseModel):
@@ -65,8 +75,13 @@ class DelegateAdmin(BaseModel):
     """Delegate file/system admin tasks to the Admin Agent."""
     task_description: str = Field(description="Description of the admin task (e.g. 'read file X', 'list dir Y').")
 
+class DelegateResearch(BaseModel):
+    """Delegate research tasks to the Research Agent using Context7."""
+    query: str = Field(description="The specific question or feature to look up (e.g. 'connection string format', 'how to use actions').")
+    library_name: str = Field(description="The name of the library (e.g. 'prisma', 'react', 'next.js').")
+
 # Manager retains git_commit directly
-manager_tools = [git_commit, PlanTasks, DelegateCommand, DelegateAdmin]
+manager_tools = [git_commit, PlanTasks, DelegateCommand, DelegateAdmin, DelegateResearch]
 manager_llm_with_tools = llm.bind_tools(manager_tools)
 
 # --- NODES ---
@@ -75,6 +90,30 @@ def manager_node(state: AgentState):
     """The Manager reasoning node."""
     messages = state["messages"]
     logger.info("Manager is thinking...")
+    
+    # Token Limit Safeguard
+    try:
+        enc = tiktoken.encoding_for_model("gpt-4")
+        all_text = "".join([msg.content for msg in messages])
+        token_count = len(enc.encode(all_text))
+        
+        if token_count > TOKEN_LIMIT:
+            logger.warning(f"⚠️ Token Limit Reached ({token_count} > {TOKEN_LIMIT}). Injecting wrap-up instruction.")
+            instruction = (
+                f"SYSTEM ALERT: Context token limit ({TOKEN_LIMIT}) reached. "
+                "You MUST wrap up immediately to avoid crashing. "
+                "1. Mark the current task as done in @IMPLEMENTATION_PLAN.md (if partially done, note that). "
+                "2. Update AGENTS.md with any learnings. "
+                "3. Call `git_commit` with a detailed message describing what was accomplished in this session + ' (token limit reached)'. "
+                "Do NOT start new tasks or ask for more details. Just save and exit."
+            )
+            # Append this as a SystemMessage to the end of the conversation for this turn only
+            # Note: This modifies the list passed to invoke, but doesn't persist it unless we return it (which we won't, we return the response)
+            # However, we want the MODEL to see it.
+            messages = list(messages) + [SystemMessage(content=instruction)]
+    except Exception as e:
+        logger.error(f"Token count failed: {e}")
+
     response = manager_llm_with_tools.invoke(messages)
     return {"messages": [response]}
 
@@ -116,6 +155,25 @@ def admin_node(state: dict):
     except Exception as e:
         return {"results": {state["tool_call_id"]: f"Admin Failed: {e}"}}
 
+def research_node(state: dict):
+    """Executes research tasks via ResearchAgent."""
+    query = state["query"]
+    lib = state["library_name"]
+    sys_prompt = (
+        "You are an expert Research Agent. Your goal is to find precise technical documentation using Context7. "
+        "When calling context7_tool, optimize the 'query' argument to be specific and technical "
+        "(e.g., use 'prisma client crud operations' instead of 'actions', or 'nextjs app router redirection' instead of 'how to move pages'). "
+        "Context7 search works best with specific technical keywords. "
+        "Analyze the request and refine the search query if necessary to get the most relevant technical documentation."
+    )
+    inputs = {"messages": [SystemMessage(content=sys_prompt), HumanMessage(content=f"Find info on '{query}' for library '{lib}'")]}
+    try:
+        result = research_agent.invoke(inputs)
+        output = result["messages"][-1].content
+        return {"results": {state["tool_call_id"]: output}}
+    except Exception as e:
+        return {"results": {state["tool_call_id"]: f"Research Failed: {e}"}}
+
 # --- DISPATCHER & LOGIC ---
 
 def handle_plan_tasks(tc, args: dict, tasks: list):
@@ -133,7 +191,7 @@ def dispatcher_node(state: AgentState):
     last_message = state["messages"][-1]
     if not last_message.tool_calls: return {}
     
-    tasks, admin_tasks, cmd_task = [], [], None
+    tasks, admin_tasks, cmd_task, research_tasks = [], [], None, []
     local_results = {}
     
     for tc in last_message.tool_calls:
@@ -149,6 +207,8 @@ def dispatcher_node(state: AgentState):
                 local_results[tid] = "Error: Only one Command Agent allowed per turn."
         elif name == "DelegateAdmin":
             admin_tasks.append({"task_description": args.get("task_description"), "tool_call_id": tid})
+        elif name == "DelegateResearch":
+            research_tasks.append({"query": args.get("query"), "library_name": args.get("library_name"), "tool_call_id": tid})
         elif name == "git_commit":
              # Execute locally
              try:
@@ -162,6 +222,7 @@ def dispatcher_node(state: AgentState):
     updates = {"results": local_results}
     if tasks: updates["pending_tasks"] = tasks
     if admin_tasks: updates["admin_queue"] = admin_tasks
+    if research_tasks: updates["research_queue"] = research_tasks
     if cmd_task: updates["command_queue"] = cmd_task # Single item
     
     return updates
@@ -181,6 +242,8 @@ def dispatch_logic(state: AgentState):
         dests.extend([Send("admin", t) for t in state["admin_queue"]])
     if state.get("command_queue"):
         dests.append(Send("command", state["command_queue"]))
+    if state.get("research_queue"):
+        dests.extend([Send("research", t) for t in state["research_queue"]])
         
     return dests if dests else "reducer"
 
@@ -204,4 +267,4 @@ def reduce_node(state: AgentState):
         new_msgs.append(ToolMessage(content=content, tool_call_id=tid))
         
     # Clean up queues
-    return {"messages": new_msgs, "pending_tasks": [], "admin_queue": [], "command_queue": None}
+    return {"messages": new_msgs, "pending_tasks": [], "admin_queue": [], "command_queue": None, "research_queue": []}
