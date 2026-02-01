@@ -1,3 +1,4 @@
+import sys
 import json
 import logging
 import tiktoken
@@ -19,16 +20,35 @@ from logger import logger
 llm = ChatOpenAI(
     model=RALPH_MODEL,
     api_key=OPENROUTER_API_KEY,
-    base_url="https://openrouter.ai/api/v1"
+    base_url="https://openrouter.ai/api/v1",
+    # This passes extra fields directly in the request body
+    extra_body={
+        "provider": {
+            "only": ["chutes"],           # strict: only Chutes, fail if unavailable
+            # OR use "order": ["chutes"]   # prefer Chutes first, fallback to others
+            # OR "ignore": ["mistral"]     # skip official Mistral provider
+        }
+    },
+    max_tokens=8192
 )
 
 subagent_llm = ChatOpenAI(
     model=SUBAGENT_MODEL,
     api_key=OPENROUTER_API_KEY,
-    base_url="https://openrouter.ai/api/v1"
+    base_url="https://openrouter.ai/api/v1",
+    # This passes extra fields directly in the request body
+    extra_body={
+        "provider": {
+            "only": ["chutes"],           # strict: only Chutes, fail if unavailable
+            # OR use "order": ["chutes"]   # prefer Chutes first, fallback to others
+            # OR "ignore": ["mistral"]     # skip official Mistral provider
+        }
+    },
+    max_tokens=8192
 )
 
-TOKEN_LIMIT = 30000
+TOKEN_LIMIT = 20000
+REMAINING_GRACE_TURNS = 5
 
 # --- WORKER SUB-AGENTS ---
 
@@ -76,7 +96,11 @@ class DelegateAdmin(BaseModel):
     task_description: str = Field(description="Description of the admin task (e.g. 'read file X', 'list dir Y').")
 
 class DelegateResearch(BaseModel):
-    """Delegate research tasks to the Research Agent using Context7."""
+    """
+    Delegate research tasks to the Research Agent. 
+    Use this tool when you need external documentation, or when a command/code fails and you need to investigate the error. 
+    This tool effectively searches for official documentation and code examples to verify syntax, library usage, or fix bugs.
+    """
     query: str = Field(description="The specific question or feature to look up (e.g. 'connection string format', 'how to use actions').")
     library_name: str = Field(description="The name of the library (e.g. 'prisma', 'react', 'next.js').")
 
@@ -88,6 +112,7 @@ manager_llm_with_tools = llm.bind_tools(manager_tools)
 
 def manager_node(state: AgentState):
     """The Manager reasoning node."""
+    global REMAINING_GRACE_TURNS 
     messages = state["messages"]
     logger.info("Manager is thinking...")
     
@@ -98,24 +123,62 @@ def manager_node(state: AgentState):
         token_count = len(enc.encode(all_text))
         
         if token_count > TOKEN_LIMIT:
-            logger.warning(f"⚠️ Token Limit Reached ({token_count} > {TOKEN_LIMIT}). Injecting wrap-up instruction.")
-            instruction = (
-                f"SYSTEM ALERT: Context token limit ({TOKEN_LIMIT}) reached. "
-                "You MUST wrap up immediately to avoid crashing. "
-                "1. Mark the current task as done in @IMPLEMENTATION_PLAN.md (if partially done, note that). "
-                "2. Update AGENTS.md with any learnings. "
-                "3. Call `git_commit` with a detailed message describing what was accomplished in this session + ' (token limit reached)'. "
-                "Do NOT start new tasks or ask for more details. Just save and exit."
-            )
-            # Append this as a SystemMessage to the end of the conversation for this turn only
-            # Note: This modifies the list passed to invoke, but doesn't persist it unless we return it (which we won't, we return the response)
-            # However, we want the MODEL to see it.
-            messages = list(messages) + [SystemMessage(content=instruction)]
+            if REMAINING_GRACE_TURNS > 0:
+                logger.warning(f"⚠️ Token Limit Reached ({token_count} > {TOKEN_LIMIT}). Grace turns remaining: {REMAINING_GRACE_TURNS}")
+                instruction = (
+                    f"SYSTEM ALERT: Context token limit ({TOKEN_LIMIT}) reached. "
+                    f"You have {REMAINING_GRACE_TURNS} turns left before the process is forcibly terminated. "
+                    "You MUST save your work NOW.\n"
+                    "1. Update `@IMPLEMENTATION_PLAN.md` (mark tasks as partial/done).\n"
+                    "2. Update `@AGENTS.md` with any key learnings.\n"
+                    "3. Call `git_commit` immediately.\n"
+                    "If you fail to do so, the system will force an auto-commit and exit, but your documentation updates may be lost. "
+                    "Do not run any other tools (e.g. do not try to read files or run commands) because the process will exit before you can see their results."
+                )
+                
+                # Fix for Strict Providers (Tool -> AI -> User sequence)
+                injected_safeguard_msgs = []
+                if messages:
+                    last_msg = messages[-1]
+                    if getattr(last_msg, "type", "") == "tool":
+                         logger.info("Injecting dummy AI acknowledgment after ToolMessage to allow warning injection.")
+                         injected_safeguard_msgs.append(AIMessage(content="Tool execution completed. Processing results."))
+
+                # Changed to HumanMessage to avoid "Unexpected role 'system' after role 'tool'" errors
+                # But now we ensure it's preceded by an AI message if needed
+                injected_safeguard_msgs.append(HumanMessage(content=instruction))
+                
+                messages = list(messages) + injected_safeguard_msgs
+                REMAINING_GRACE_TURNS -= 1
+            else:
+                logger.error(f"❌ Hard Token Limit Exceeded ({token_count}) and Grace Period Expired. Force Exit.")
+                
+                # Auto-Save Safety Net
+                try:
+                    logger.info("Performing Auto-Save before exit...")
+                    git_commit.invoke({"message": "Auto-save: Hard token limit exceeded."})
+                except Exception as save_err:
+                    logger.error(f"Auto-save failed: {save_err}")
+                
+                sys.exit(0)
+        else:
+             # Reset grace turns if tokens drop below limit
+             REMAINING_GRACE_TURNS = 5
+
     except Exception as e:
         logger.error(f"Token count failed: {e}")
 
+    # Fix for Chutes/Strict Providers: Ensure history doesn't end with AIMessage
+    injected_msgs = []
+    if messages and isinstance(messages[-1], AIMessage) and not messages[-1].tool_calls:
+        logger.info("Injecting 'Continue' message to satisfy provider turn-taking.")
+        cont_msg = HumanMessage(content="Continue.")
+        messages = list(messages) + [cont_msg]
+        injected_msgs.append(cont_msg)
+
     response = manager_llm_with_tools.invoke(messages)
-    return {"messages": [response]}
+    logger.info(f"Manager response: {response}")
+    return {"messages": injected_msgs + [response]}
 
 def worker_node(state: WorkerTask):
     """Executes a task assigned to a worker."""
@@ -134,14 +197,18 @@ def worker_node(state: WorkerTask):
 def command_node(state: dict):
     """Executes a command via CommandAgent."""
     cmd = state["command"]
-    sys_prompt = "You are a Command Agent. Execute the requested command using run_command."
+    sys_prompt = (
+        "You are a Command Agent. Execute the requested command using `run_command`. "
+        "If the command execution appears to hang or takes an excessive amount of time, "
+        "return a final response stating that the command is taking too long and advise checking the code for issues."
+    )
     inputs = {"messages": [SystemMessage(content=sys_prompt), HumanMessage(content=f"Run: {cmd}")]}
     try:
         result = command_agent.invoke(inputs)
         output = result["messages"][-1].content
         return {"results": {state["tool_call_id"]: output}}
     except Exception as e:
-        return {"results": {state["tool_call_id"]: f"Command Failed: {e}"}}
+        return {"results": {state["tool_call_id"]: f"Command Failed: {e}\nSUGGESTION: Use `DelegateResearch` to investigate this error."}}
 
 def admin_node(state: dict):
     """Executes admin tasks via AdminAgent."""

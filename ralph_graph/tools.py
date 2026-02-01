@@ -139,17 +139,21 @@ def run_command(command: str, timeout: int = 120, background: bool = False) -> s
 @tool
 @log_tool_usage
 def git_commit(message: str) -> str:
-    """Commit changes to git inside the workspace."""
+    """Commit changes to git inside the workspace (running locally on host)."""
     try:
+        # Validate workspace
+        if not os.path.isdir(WORKSPACE_DIR):
+             return f"Error: Workspace directory '{WORKSPACE_DIR}' does not exist."
+
         # Stage all
-        add_cmd = ["docker", "exec", "-w", WORKSPACE_DIR, "ralph-workspace", "/bin/sh", "-c", "git add -A"]
-        subprocess.run(add_cmd, check=True, capture_output=True)
+        # We run git commands directly in the WORKSPACE_DIR
+        add_cmd = ["git", "add", "-A"]
+        subprocess.run(add_cmd, cwd=WORKSPACE_DIR, check=True, capture_output=True)
 
         # Commit
-        safe_message = message.replace('"', '\\"')
-        commit_cmd = ["docker", "exec", "-w", WORKSPACE_DIR, "ralph-workspace", "/bin/sh", "-c", f'git commit -m "{safe_message}"']
+        commit_cmd = ["git", "commit", "-m", message]
         
-        result = subprocess.run(commit_cmd, capture_output=True, text=True)
+        result = subprocess.run(commit_cmd, cwd=WORKSPACE_DIR, capture_output=True, text=True)
         
         output = f"STDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}"
         if result.returncode != 0:

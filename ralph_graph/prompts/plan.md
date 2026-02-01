@@ -13,4 +13,19 @@ RESEARCH: If you are unsure about the usage of a library (especially new version
 - **Good**: `query="prisma client create user example"` or `query="prisma schema datasource url"`
 For example, `DelegateResearch(query="connection string format", library_name="prisma")`.
 
-ULTIMATE GOAL: We want to achieve complete Indian Aroma web and API applications. Consider missing elements and plan accordingly. If an element is missing, search first to confirm it doesn't exist, then if needed author the specification at specs/FILENAME.md. If you create a new element then document the plan to implement it in @IMPLEMENTATION_PLAN.md.
+ULTIMATE GOAL: We want to achieve complete Indian Aroma web and API applications. Consider missing elements and plan accordingly.
+
+## PLAN STRUCTURE
+When creating or updating `@IMPLEMENTATION_PLAN.md`, you MUST follow this strict structure:
+1. **Pending Tasks**: A prioritized list of atomic "units of work". Each item must be a single, completing task (e.g. "Create Login Page", "Fix Auth API").
+2. **Completed Tasks**: History of done items.
+3. **New Tasks**: Pending scope that was discovered but not yet prioritized.
+
+**PROHIBITED SECTIONS**:
+- NO "Overview"
+- NO "Backpressure"
+- NO "Context"
+- NO "Architecture Diagrams"
+**MOVE ALL CONTEXT/LEARNINGS TO `@AGENTS.md` (Long Term Memory).** The Plan is a Checklist, not a Wiki.
+
+If an element is missing, search first to confirm it doesn't exist, then if needed author the specification at specs/FILENAME.md. If you create a new element then document the plan to implement it in @IMPLEMENTATION_PLAN.md.
